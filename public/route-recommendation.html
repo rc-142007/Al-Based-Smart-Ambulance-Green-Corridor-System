@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Route Recommendation — Smart Ambulance AI</title>
+  <meta name="description" content="Live route navigation, ETA, junction tracking and voice guidance for ambulance emergency routing."/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+
+  <!-- Leaflet.js (free, no API key) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    body { background: var(--bg-dark); }
+
+    /* ── Layout ── */
+    .route-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
+    @media (max-width: 900px) { .route-layout { grid-template-columns: 1fr; } }
+
+    /* ── Map ── */
+    #map {
+      height: 500px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-glass);
+      z-index: 0;
+    }
+    .map-loading {
+      height: 500px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; background: var(--bg-glass); color: var(--text-secondary);
+    }
+
+    /* ── Voice Navigation Banner ── */
+    #nav-banner {
+      display: none;
+      background: linear-gradient(135deg, rgba(21,101,192,0.25), rgba(30,136,229,0.12));
+      border: 1px solid rgba(30,136,229,0.5);
+      border-radius: var(--radius-lg);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      align-items: center;
+      gap: 16px;
+    }
+    #nav-banner .nav-icon { font-size: 2rem; flex-shrink: 0; }
+    #nav-banner .nav-instruction {
+      flex: 1;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+    #nav-banner .nav-dist {
+      font-size: 0.82rem;
+      color: var(--blue-light);
+      margin-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #nav-banner .nav-step-count {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    /* ── Voice button in navbar ── */
+    #voice-btn {
+      background: rgba(30,136,229,0.15);
+      border: 1px solid rgba(30,136,229,0.4);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #voice-btn:hover { background: rgba(30,136,229,0.3); }
+    #voice-btn.muted { opacity: 0.5; }
+
+    /* ── Sidebar ── */
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    .hospital-card {
+      padding: 20px;
+      background: linear-gradient(135deg, rgba(21,101,192,0.15), rgba(30,136,229,0.08));
+      border: 1px solid rgba(30,136,229,0.3);
+      border-radius: var(--radius-lg);
+    }
+    .hospital-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+    .hospital-card .hospital-address { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px; }
+
+    /* ── Steps List ── */
+    .steps-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .steps-list::-webkit-scrollbar { width: 4px; }
+    .steps-list::-webkit-scrollbar-thumb { background: var(--border-glass); border-radius: 2px; }
+
+    .step-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 10px; border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      transition: all 0.3s ease;
+      font-size: 0.83rem;
+    }
+    .step-item.active-step {
+      background: rgba(30,136,229,0.12);
+      border-color: rgba(30,136,229,0.4);
+    }
+    .step-item.done-step { opacity: 0.4; }
+    .step-num {
+      min-width: 22px; height: 22px;
+      background: var(--border-glass); color: var(--text-muted);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+      transition: all 0.3s;
+    }
+    .step-item.active-step .step-num { background: var(--blue-accent); color: #fff; }
+    .step-item.done-step .step-num { background: var(--green-success); color: #fff; }
+
+    /* ── Junctions ── */
+    .junction-list { display: flex; flex-direction: column; gap: 6px; }
+
+    /* ── Hospital comparison table ── */
+    .other-hospitals-table { width: 100%; font-size: 0.82rem; }
+    .other-hospitals-table th, .other-hospitals-table td {
+      padding: 8px 10px; border-bottom: 1px solid var(--border-glass); text-align: left;
+    }
+    .other-hospitals-table th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; }
+    .best-row { background: rgba(30,136,229,0.07); font-weight: 700; }
+
+    /* ── Police list ── */
+    .police-status-list { display: flex; flex-direction: column; gap: 8px; }
+    .police-status-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border-glass);
+      font-size: 0.83rem;
+    }
+    .police-status-item .police-info { display: flex; flex-direction: column; }
+    .police-status-item .police-name { font-weight: 600; }
+    .police-status-item .police-junction { font-size: 0.75rem; color: var(--text-secondary); }
+
+    /* ── Leaflet custom markers ── */
+    .emoji-marker {
+      background: none !important;
+      border: none !important;
+      font-size: 28px;
+      line-height: 1;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.7));
+    }
+    .emoji-marker-sm {
+      background: none !important;
+      border: none !important;
+      font-size: 20px;
+      line-height: 1;
+      filter: drop-shadow(0 1px 4px rgba(0,0,0,0.6));
+    }
+    /* GPS live indicator */
+    #gps-status {
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:0.78rem; color: var(--text-secondary);
+    }
+    .gps-dot {
+      width:8px; height:8px; border-radius:50%;
+      background: var(--text-muted);
+    }
+    .gps-dot.active {
+      background: var(--green-success);
+      box-shadow: 0 0 6px var(--green-success);
+      animation: pulse-dot 1.5s infinite;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity:1; } 50% { opacity:0.4; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="brand-icon">🚑</span>
+    <span>Route Navigation</span>
+  </div>
+  <div class="navbar-actions" style="gap:10px;">
+    <span id="gps-status"><span class="gps-dot" id="gps-dot"></span>GPS</span>
+    <button id="voice-btn" onclick="toggleVoice()" title="Toggle voice navigation">
+      🔊 Voice ON
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick="window.location.href='/ambulance-dashboard.html'">← Dashboard</button>
+    <button class="btn btn-success btn-sm" id="arrived-btn" onclick="markArrived()" style="display:none;">✅ Mark Arrived</button>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="page-container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">🗺️ Route Recommendation</h1>
+      <p class="page-subtitle" id="route-subtitle">Loading your active alert…</p>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <span class="badge badge-critical" id="severity-badge" style="display:none;"></span>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div id="loading-state" class="map-loading">
+    <span style="font-size:2.5rem;">🗺️</span>
+    <div class="spinner" style="width:32px;height:32px;border-width:3px;"></div>
+    <p>Computing optimal route…</p>
+  </div>
+
+  <!-- Main Content (hidden until loaded) -->
+  <div id="main-content" style="display:none;">
+
+    <!-- Voice Navigation Banner -->
+    <div id="nav-banner">
+      <div class="nav-icon" id="nav-icon">🗺️</div>
+      <div style="flex:1;">
+        <div class="nav-instruction" id="nav-instruction">Starting navigation…</div>
+        <div class="nav-dist" id="nav-dist"></div>
+      </div>
+      <div class="nav-step-count" id="nav-step-count"></div>
+    </div>
+
+    <!-- ETA Summary -->
+    <div class="grid-4" style="margin-bottom:20px;">
+      <div class="glass-card stat-card pulse-red">
+        <span class="stat-icon">⏱️</span>
+        <div class="stat-value" id="final-eta" style="color:var(--red-hot);">—</div>
+        <div class="stat-label">Final ETA (min)</div>
+      </div>
+      <div class="glass-card stat-card">
+        <span class="stat-icon">🤖</span>
+        <div class="stat-value" id="google-eta">—</div>
+        <div class="stat-label">Base ETA (min)</div>
+      </div>
+      <div class="glass-card stat-card">
+        <span class="stat-icon">📊</span>
+        <div class="stat-value" id="predicted-delay" style="color:var(--orange);">—</div>
+        <div class="stat-label">ML Delay (min)</div>
+      </div>
+      <div class="glass-card stat-card">
+        <span class="stat-icon">📏</span>
+        <div class="stat-value" id="distance">—</div>
+        <div class="stat-label">Distance (km)</div>
+      </div>
+    </div>
+
+    <!-- Route Layout -->
+    <div class="route-layout">
+      <!-- Map + Hospital Table -->
+      <div>
+        <div id="map"></div>
+
+        <!-- All hospitals evaluated -->
+        <div class="glass-card" style="padding:20px; margin-top:16px;">
+          <h3 style="font-size:0.9rem; font-weight:700; margin-bottom:12px;">🏥 All Hospitals Evaluated</h3>
+          <table class="other-hospitals-table">
+            <thead>
+              <tr><th>Hospital</th><th>Base ETA</th><th>ML Delay</th><th>Final ETA</th></tr>
+            </thead>
+            <tbody id="hospitals-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <!-- Selected Hospital -->
+        <div class="hospital-card">
+          <div style="font-size:0.7rem; color:var(--blue-light); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px;">✅ Recommended Hospital</div>
+          <h3 id="hospital-name">—</h3>
+          <div class="hospital-address" id="hospital-address">—</div>
+          <div style="display:flex; gap:16px;">
+            <div><div style="font-size:0.7rem;color:var(--text-muted);">JUNCTIONS</div><strong id="sidebar-junctions">—</strong></div>
+            <div><div style="font-size:0.7rem;color:var(--text-muted);">MAJOR</div><strong id="sidebar-major">—</strong></div>
+            <div><div style="font-size:0.7rem;color:var(--text-muted);">CONG. WEIGHT</div><strong id="sidebar-congestion">—</strong></div>
+          </div>
+        </div>
+
+        <!-- Junctions on Route -->
+        <div class="glass-card" style="padding:20px;">
+          <h3 style="font-size:0.9rem; font-weight:700; margin-bottom:12px;">🚦 Junctions on Route</h3>
+          <div class="junction-list" id="junction-list">
+            <div style="color:var(--text-muted); font-size:0.85rem;">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Police Status -->
+        <div class="glass-card" style="padding:20px;">
+          <h3 style="font-size:0.9rem; font-weight:700; margin-bottom:12px;">👮 Police Officers Notified</h3>
+          <div class="police-status-list" id="police-list">
+            <div style="color:var(--text-muted); font-size:0.85rem;">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Turn-by-Turn Steps -->
+        <div class="glass-card" style="padding:20px;">
+          <h3 style="font-size:0.9rem; font-weight:700; margin-bottom:12px;">📋 Turn-by-Turn Directions</h3>
+          <div class="steps-list" id="steps-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/utils.js"></script>
+<script src="/js/socket-client.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  Smart Ambulance AI — Route Navigation with Leaflet + OSRM Voice Navigation
+// ════════════════════════════════════════════════════════════════════════════
+
+let alertData         = null;
+let leafletMap        = null;
+let ambulanceMarker   = null;
+let routePolyline     = null;
+let voiceEnabled      = true;
+let voiceWatchId      = null;     // geolocation watchPosition ID
+let currentStepIndex  = 0;
+let stepAnnounced     = [];       // [{ pre: bool, close: bool }] per step
+let steps             = [];       // route steps from server
+let routeCoords       = [];       // [{lat,lng}] full route geometry
+let arrived           = false;
+let isNavigating      = false;
+
+const user = getUser();
+if (!user || user.role !== 'ambulance') window.location.href = '/login.html';
+
+// ─── Haversine distance in meters ────────────────────────────────────────────
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R  = 6371000;
+  const dL = (lat2 - lat1) * Math.PI / 180;
+  const dl = (lng2 - lng1) * Math.PI / 180;
+  const a  = Math.sin(dL/2)**2 +
+             Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dl/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ─── Speak text via Web Speech API ───────────────────────────────────────────
+function speak(text) {
+  if (!voiceEnabled) return;
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utt  = new SpeechSynthesisUtterance(text);
+  utt.rate   = 1.0;
+  utt.pitch  = 1.0;
+  utt.volume = 1.0;
+  utt.lang   = 'en-IN';
+  window.speechSynthesis.speak(utt);
+}
+
+// ─── Toggle voice on/off ──────────────────────────────────────────────────
+function toggleVoice() {
+  voiceEnabled = !voiceEnabled;
+  const btn = document.getElementById('voice-btn');
+  if (voiceEnabled) {
+    btn.innerHTML  = '🔊 Voice ON';
+    btn.classList.remove('muted');
+    showToast('Voice navigation ON', 'success');
+  } else {
+    btn.innerHTML  = '🔇 Voice OFF';
+    btn.classList.add('muted');
+    window.speechSynthesis?.cancel();
+    showToast('Voice navigation muted', 'info');
+  }
+}
+
+// ─── Get maneuver icon from type/modifier ─────────────────────────────────
+function getManeuverIcon(step) {
+  const t = (step.maneuverType || '').toLowerCase();
+  const m = (step.maneuverModifier || '').toLowerCase();
+  if (t === 'depart')  return '🚀';
+  if (t === 'arrive')  return '🏥';
+  if (m === 'left')    return '↰';
+  if (m === 'right')   return '↱';
+  if (m === 'slight left')  return '↖️';
+  if (m === 'slight right') return '↗️';
+  if (m === 'sharp left')   return '⬅️';
+  if (m === 'sharp right')  return '➡️';
+  if (t === 'roundabout' || t === 'rotary') return '🔄';
+  return '⬆️';
+}
+
+// ─── Update nav banner ────────────────────────────────────────────────────
+function updateNavBanner(stepIdx, distToNext) {
+  const banner = document.getElementById('nav-banner');
+  if (!steps.length) return;
+  banner.style.display = 'flex';
+
+  const step = steps[stepIdx] || steps[steps.length - 1];
+  document.getElementById('nav-icon').textContent        = getManeuverIcon(step);
+  document.getElementById('nav-instruction').textContent = step.instruction;
+  document.getElementById('nav-dist').textContent        = distToNext != null
+    ? `In ${distToNext < 1000 ? Math.round(distToNext) + ' m' : (distToNext/1000).toFixed(1) + ' km'}`
+    : step.distance;
+  document.getElementById('nav-step-count').textContent  = `Step ${stepIdx+1} / ${steps.length}`;
+}
+
+// ─── Highlight active step in sidebar ────────────────────────────────────
+function highlightStep(idx) {
+  document.querySelectorAll('.step-item').forEach((el, i) => {
+    el.classList.remove('active-step', 'done-step');
+    if (i < idx)  el.classList.add('done-step');
+    if (i === idx) {
+      el.classList.add('active-step');
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
+}
+
+// ─── GPS position update callback ────────────────────────────────────────
+function onPositionUpdate(pos) {
+  const lat = pos.coords.latitude;
+  const lng = pos.coords.longitude;
+
+  // Update GPS dot
+  document.getElementById('gps-dot').classList.add('active');
+
+  // Move ambulance marker
+  if (ambulanceMarker) {
+    ambulanceMarker.setLatLng([lat, lng]);
+    leafletMap.panTo([lat, lng], { animate: true, duration: 1 });
+  }
+
+  if (arrived || !steps.length) return;
+
+  // ── Check if reached hospital ──
+  const hospital = alertData.selectedHospital;
+  const distToHospital = haversineM(lat, lng, hospital.latitude, hospital.longitude);
+  if (distToHospital < 50) {
+    arrived = true;
+    speak(`You have arrived at ${hospital.hospitalName}. Well done!`);
+    updateNavBanner(steps.length - 1, 0);
+    document.getElementById('nav-icon').textContent        = '🏥';
+    document.getElementById('nav-instruction').textContent = `Arrived at ${hospital.hospitalName}`;
+    document.getElementById('nav-dist').textContent        = '🎉 You have arrived!';
+    showToast('🏥 Arrived at hospital!', 'success');
+    return;
+  }
+
+  // ── Proximity check for each remaining step ──
+  for (let i = currentStepIndex; i < steps.length; i++) {
+    const step = steps[i];
+    if (!step.maneuverLocation) continue;
+
+    const dist = haversineM(lat, lng, step.maneuverLocation.lat, step.maneuverLocation.lng);
+
+    // Pre-announce at 200 m
+    if (dist < 200 && !stepAnnounced[i]?.pre) {
+      stepAnnounced[i] = stepAnnounced[i] || {};
+      stepAnnounced[i].pre = true;
+      const distText = dist < 100 ? 'In 100 meters' : 'In 200 meters';
+      speak(`${distText}, ${step.instruction}`);
+      updateNavBanner(i, dist);
+    }
+
+    // Close reminder at 50 m
+    if (dist < 50 && !stepAnnounced[i]?.close) {
+      stepAnnounced[i] = stepAnnounced[i] || {};
+      stepAnnounced[i].close = true;
+      speak(step.instruction);
+    }
+
+    // Advance step when within 30 m
+    if (dist < 30 && i === currentStepIndex) {
+      currentStepIndex = Math.min(i + 1, steps.length - 1);
+      highlightStep(currentStepIndex);
+      if (currentStepIndex < steps.length) {
+        updateNavBanner(currentStepIndex, null);
+      }
+    }
+
+    // Only process the nearest upcoming step
+    if (dist < 500) break;
+  }
+}
+
+// ─── Start live GPS tracking ──────────────────────────────────────────────
+function startGPSTracking() {
+  if (!navigator.geolocation) {
+    showToast('GPS not available in this browser', 'error');
+    return;
+  }
+  isNavigating = true;
+  voiceWatchId = navigator.geolocation.watchPosition(
+    onPositionUpdate,
+    (err) => {
+      console.warn('GPS error:', err.message);
+      document.getElementById('gps-dot').classList.remove('active');
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 2000 }
+  );
+}
+
+// ─── Create Leaflet emoji marker ──────────────────────────────────────────
+function emojiIcon(emoji, size) {
+  return L.divIcon({
+    className: size === 'sm' ? 'emoji-marker-sm' : 'emoji-marker',
+    html: emoji,
+    iconSize:   size === 'sm' ? [24, 24] : [36, 36],
+    iconAnchor: size === 'sm' ? [12, 12] : [18, 18],
+  });
+}
+
+// ─── Initialise Leaflet Map ───────────────────────────────────────────────
+function initLeafletMap() {
+  if (!alertData) return;
+
+  const hospital = alertData.selectedHospital;
+  const origin   = alertData.currentLocation;
+  const route    = alertData.selectedRoute;
+
+  routeCoords = (route.coordinates || []).map(c => [c.lat, c.lng]);
+  steps       = route.steps || [];
+  stepAnnounced = steps.map(() => ({ pre: false, close: false }));
+
+  // Centre map between origin and hospital
+  const midLat = (origin.latitude  + hospital.latitude)  / 2;
+  const midLng = (origin.longitude + hospital.longitude) / 2;
+
+  leafletMap = L.map('map', {
+    center: [midLat, midLng],
+    zoom:   13,
+    zoomControl: true,
+  });
+
+  // CartoDB Dark Matter tiles — dark theme, no API key
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 20,
+  }).addTo(leafletMap);
+
+  // Draw route polyline
+  if (routeCoords.length > 1) {
+    routePolyline = L.polyline(routeCoords, {
+      color:     '#FF1744',
+      weight:    6,
+      opacity:   0.9,
+      lineJoin:  'round',
+      lineCap:   'round',
+    }).addTo(leafletMap);
+    leafletMap.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
+  }
+
+  // Ambulance marker (will move with GPS)
+  ambulanceMarker = L.marker([origin.latitude, origin.longitude], {
+    icon:  emojiIcon('🚑', 'lg'),
+    title: 'Ambulance Location',
+    zIndexOffset: 1000,
+  }).addTo(leafletMap)
+    .bindPopup('<strong>🚑 Ambulance</strong><br>Current location');
+
+  // Hospital marker
+  L.marker([hospital.latitude, hospital.longitude], {
+    icon:  emojiIcon('🏥', 'lg'),
+    title: hospital.hospitalName,
+  }).addTo(leafletMap)
+    .bindPopup(`<strong>🏥 ${hospital.hospitalName}</strong><br>${hospital.address || ''}`);
+
+  // Junction markers
+  const junctions = route.junctionsOnRoute || route.junctions || [];
+  junctions.forEach(j => {
+    const icon = j.isMajorJunction ? '🚦' : '🔵';
+    L.marker([j.latitude, j.longitude], {
+      icon:  emojiIcon(icon, 'sm'),
+      title: j.junctionName,
+    }).addTo(leafletMap)
+      .bindPopup(`<strong>${icon} ${j.junctionName}</strong><br>Congestion: ${j.congestionWeight}`);
+  });
+
+  // Start GPS tracking after map is ready
+  startGPSTracking();
+
+  // First voice announcement
+  setTimeout(() => {
+    speak(`Starting navigation to ${hospital.hospitalName}. ${steps[0]?.instruction || 'Proceed to your destination.'}`);
+    updateNavBanner(0, null);
+    highlightStep(0);
+  }, 1500);
+}
+
+// ─── Render all alert data into UI ───────────────────────────────────────
+function renderAlert() {
+  const route    = alertData.selectedRoute;
+  const hospital = alertData.selectedHospital;
+
+  document.getElementById('loading-state').style.display = 'none';
+  document.getElementById('main-content').style.display  = 'block';
+  document.getElementById('arrived-btn').style.display   = 'inline-flex';
+
+  document.getElementById('route-subtitle').textContent  = `En route to ${hospital.hospitalName}`;
+  const badge = document.getElementById('severity-badge');
+  badge.textContent = alertData.patientSeverity;
+  badge.className   = `badge badge-${alertData.patientSeverity}`;
+  badge.style.display = 'inline-flex';
+
+  // Stats
+  document.getElementById('final-eta').textContent       = route.finalETA_min;
+  document.getElementById('google-eta').textContent      = route.googleETA_min;
+  document.getElementById('predicted-delay').textContent = route.predictedDelay_min;
+  document.getElementById('distance').textContent        = route.distance_km;
+
+  // Hospital
+  document.getElementById('hospital-name').textContent     = hospital.hospitalName;
+  document.getElementById('hospital-address').textContent  = hospital.address || '—';
+  document.getElementById('sidebar-junctions').textContent = route.junctionCount;
+  document.getElementById('sidebar-major').textContent     = route.majorJunctionCount;
+  document.getElementById('sidebar-congestion').textContent= route.totalCongestionWeight;
+
+  // Junctions
+  const junctList = document.getElementById('junction-list');
+  const junctions = route.junctionsOnRoute || route.junctions || [];
+  if (junctions.length) {
+    junctList.innerHTML = junctions.map((j) => `
+      <div class="junction-item">
+        <div class="junction-dot ${j.isMajorJunction ? 'major' : 'minor'}"></div>
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:0.85rem;">${j.junctionName}</div>
+          <div style="font-size:0.72rem;color:var(--text-secondary);">
+            ${j.isMajorJunction ? '⚠️ Major' : 'Minor'} • Congestion: ${j.congestionWeight}
+          </div>
+        </div>
+      </div>`).join('');
+  } else {
+    junctList.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;">No junctions detected on route</div>';
+  }
+
+  // Police list
+  const policeList = document.getElementById('police-list');
+  if (alertData.notifiedPolice && alertData.notifiedPolice.length) {
+    policeList.innerHTML = alertData.notifiedPolice.map(p => `
+      <div class="police-status-item">
+        <div class="police-info">
+          <span class="police-name">👮 ${p.officerName}</span>
+          <span class="police-junction">📍 ${p.junctionName}</span>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.72rem;color:var(--text-muted);">ETA</div>
+          <div style="font-weight:700;color:var(--blue-light);font-family:'JetBrains Mono',monospace;">${p.etaToJunction_min} min</div>
+          <div style="font-size:0.7rem;color:${p.acknowledged ? 'var(--green-success)' : 'var(--orange)'};">
+            ${p.acknowledged ? '✅ ACK' : '⏳ Waiting'}
+          </div>
+        </div>
+      </div>`).join('');
+  } else {
+    policeList.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;">No police assigned to this route</div>';
+  }
+
+  // Turn-by-turn steps
+  const stepsList = document.getElementById('steps-list');
+  const routeSteps = route.steps || [];
+  if (routeSteps.length) {
+    stepsList.innerHTML = routeSteps.map((s, i) => `
+      <div class="step-item" id="step-item-${i}">
+        <div class="step-num">${i + 1}</div>
+        <div style="flex:1;">
+          <div>${getManeuverIconFromStep(s)} ${s.instruction}</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">${s.distance}</div>
+        </div>
+      </div>`).join('');
+  }
+
+  // Hospital comparison table
+  const tbody = document.getElementById('hospitals-table');
+  if (alertData.allHospitalsEvaluated && alertData.allHospitalsEvaluated.length) {
+    tbody.innerHTML = alertData.allHospitalsEvaluated.map(h => `
+      <tr class="${h.isSelected ? 'best-row' : ''}">
+        <td>${h.isSelected ? '✅ ' : ''}${h.hospitalName}</td>
+        <td>${h.googleETA_min}</td>
+        <td style="color:var(--orange);">+${h.predictedDelay_min}</td>
+        <td style="font-weight:700;color:${h.isSelected ? 'var(--green-success)' : 'inherit'}">${h.finalETA_min}</td>
+      </tr>`).join('');
+  } else {
+    const r = alertData.selectedRoute;
+    const h = alertData.selectedHospital;
+    if (h && r) {
+      tbody.innerHTML = `<tr class="best-row">
+        <td>✅ ${h.hospitalName}</td>
+        <td>${r.googleETA_min}</td>
+        <td style="color:var(--orange);">+${r.predictedDelay_min}</td>
+        <td style="font-weight:700;color:var(--green-success)">${r.finalETA_min}</td>
+      </tr>`;
+    }
+  }
+
+  // Init map
+  initLeafletMap();
+}
+
+function getManeuverIconFromStep(s) {
+  if (!s) return '⬆️';
+  return getManeuverIcon({ maneuverType: s.maneuverType, maneuverModifier: s.maneuverModifier });
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const data = await apiGet('/api/alert/active');
+    alertData  = data.alert;
+    if (!alertData) {
+      document.getElementById('route-subtitle').textContent = 'No active alert. Raise an alert first.';
+      document.getElementById('loading-state').innerHTML = `
+        <span style="font-size:2.5rem;">ℹ️</span>
+        <p style="color:var(--text-secondary);">No active alert found.</p>
+        <button class="btn btn-emergency" onclick="window.location.href='/raise-alert.html'">🚨 Raise Alert</button>`;
+      return;
+    }
+    renderAlert();
+  } catch (err) {
+    document.getElementById('route-subtitle').textContent = 'Error loading alert data.';
+    showToast('Error loading alert: ' + err.message, 'error');
+  }
+}
+
+async function markArrived() {
+  if (!alertData) return;
+  try {
+    if (voiceWatchId !== null) navigator.geolocation.clearWatch(voiceWatchId);
+    window.speechSynthesis?.cancel();
+    await apiPatch(`/api/alert/${alertData._id}/status`, { status: 'arrived' });
+    showToast('✅ Marked as arrived! Alert resolved.', 'success');
+    setTimeout(() => window.location.href = '/ambulance-dashboard.html', 1500);
+  } catch (_) {
+    showToast('Failed to update status.', 'error');
+  }
+}
+
+init();
+</script>
+</body>
+</html>

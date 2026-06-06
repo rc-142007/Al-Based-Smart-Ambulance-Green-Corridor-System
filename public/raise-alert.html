@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Raise Emergency Alert — Smart Ambulance AI</title>
+  <meta name="description" content="Create an emergency alert, enter patient details, and get the optimal hospital route."/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+  <style>
+    body { background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(211,47,47,0.12) 0%, transparent 60%), var(--bg-dark); }
+    .form-card { padding: 32px; }
+
+    .severity-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .severity-option { display: none; }
+    .severity-label {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; padding: 16px 12px; border-radius: var(--radius-md);
+      border: 2px solid var(--border-glass); cursor: pointer;
+      transition: all 0.25s ease; text-align: center; background: var(--bg-glass);
+      font-size: 0.85rem; font-weight: 600;
+    }
+    .severity-label .sev-icon { font-size: 1.8rem; }
+    .severity-option:checked + .severity-label {
+      border-color: var(--blue-accent);
+      background: rgba(30, 136, 229, 0.1);
+      box-shadow: 0 0 0 2px rgba(30, 136, 229, 0.2);
+    }
+    input[value="critical"]:checked + .severity-label {
+      border-color: var(--red-hot);
+      background: rgba(255, 23, 68, 0.1);
+      box-shadow: 0 0 0 2px rgba(255, 23, 68, 0.2);
+    }
+    input[value="medium"]:checked + .severity-label {
+      border-color: var(--orange);
+      background: rgba(255, 109, 0, 0.1);
+      box-shadow: 0 0 0 2px rgba(255, 109, 0, 0.2);
+    }
+
+    .location-box {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px;
+      background: rgba(30, 136, 229, 0.06);
+      border: 1px solid rgba(30, 136, 229, 0.2);
+      border-radius: var(--radius-md);
+    }
+    .location-box .loc-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .location-box .loc-text { flex: 1; font-size: 0.88rem; color: var(--text-secondary); }
+    .location-box .loc-text strong { color: var(--text-primary); display: block; margin-bottom: 2px; }
+
+    .submit-section {
+      background: rgba(255,23,68,0.05);
+      border: 1px solid rgba(255,23,68,0.2);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      text-align: center;
+    }
+    .submit-section h3 { font-size: 1rem; margin-bottom: 8px; }
+    .submit-section p  { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; }
+
+    .progress-steps {
+      display: flex; gap: 0; margin-bottom: 32px;
+      background: var(--bg-glass); border: 1px solid var(--border-glass);
+      border-radius: var(--radius-lg); padding: 16px 24px;
+      align-items: center; justify-content: space-between;
+    }
+    .progress-step { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
+    .progress-step .step-circle {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--border-glass); color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+      transition: all 0.3s;
+    }
+    .progress-step.done .step-circle { background: var(--blue-accent); color: #fff; }
+    .progress-step.active .step-circle { background: var(--red-hot); color: #fff; box-shadow: 0 0 12px var(--red-glow); }
+    .progress-connector { flex: 1; height: 1px; background: var(--border-glass); margin: 0 8px; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="brand-icon">🚑</span>
+    <span>Smart Ambulance AI</span>
+  </div>
+  <div class="navbar-actions">
+    <button class="btn btn-ghost btn-sm" onclick="window.location.href='/ambulance-dashboard.html'">← Dashboard</button>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="page-container" style="max-width:680px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">🚨 Raise Emergency Alert</h1>
+      <p class="page-subtitle">Enter patient details to get the optimal hospital and route</p>
+    </div>
+  </div>
+
+  <!-- Progress Steps -->
+  <div class="progress-steps">
+    <div class="progress-step done">
+      <div class="step-circle">✓</div>
+      <span style="color:var(--text-secondary);">Logged In</span>
+    </div>
+    <div class="progress-connector"></div>
+    <div class="progress-step active">
+      <div class="step-circle">2</div>
+      <span>Patient Info</span>
+    </div>
+    <div class="progress-connector"></div>
+    <div class="progress-step" id="step-3">
+      <div class="step-circle">3</div>
+      <span style="color:var(--text-muted);">Route Found</span>
+    </div>
+    <div class="progress-connector"></div>
+    <div class="progress-step" id="step-4">
+      <div class="step-circle">4</div>
+      <span style="color:var(--text-muted);">Navigating</span>
+    </div>
+  </div>
+
+  <!-- Form Card -->
+  <div class="glass-card form-card">
+    <form id="alert-form" onsubmit="handleSubmit(event)" novalidate>
+
+      <!-- Severity -->
+      <div class="form-group" style="margin-bottom:24px;">
+        <label class="form-label">Patient Severity *</label>
+        <div class="severity-grid">
+          <div>
+            <input class="severity-option" type="radio" name="severity" id="sev-low" value="low" required/>
+            <label class="severity-label" for="sev-low">
+              <span class="sev-icon">🟢</span> Low
+              <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">Stable condition</span>
+            </label>
+          </div>
+          <div>
+            <input class="severity-option" type="radio" name="severity" id="sev-medium" value="medium"/>
+            <label class="severity-label" for="sev-medium">
+              <span class="sev-icon">🟠</span> Medium
+              <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">Needs attention</span>
+            </label>
+          </div>
+          <div>
+            <input class="severity-option" type="radio" name="severity" id="sev-critical" value="critical"/>
+            <label class="severity-label" for="sev-critical">
+              <span class="sev-icon">🔴</span> Critical
+              <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">Life-threatening</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Illness Type -->
+      <div class="form-group" style="margin-bottom:24px;">
+        <label class="form-label" for="illness">Illness / Emergency Type *</label>
+        <select class="form-select" id="illness" name="illness" required>
+          <option value="" disabled selected>Select emergency type…</option>
+          <option value="heart_attack">❤️  Heart Attack (Cardiology)</option>
+          <option value="stroke">🧠  Stroke (Neurology)</option>
+          <option value="trauma">🩹  Trauma (Trauma Center)</option>
+          <option value="road_accident">🚗  Road Accident (Trauma + Critical Care)</option>
+          <option value="respiratory">🫁  Respiratory Emergency (Pulmonology)</option>
+          <option value="general">🏥  General Emergency (Critical Care)</option>
+        </select>
+      </div>
+
+      <!-- Weather (context for ML) -->
+      <div class="form-group" style="margin-bottom:24px;">
+        <label class="form-label" for="weather">Current Weather</label>
+        <select class="form-select" id="weather" name="weather">
+          <option value="Clear">☀️  Clear</option>
+          <option value="Cloudy">☁️  Cloudy</option>
+          <option value="Rainy">🌧️  Rainy</option>
+          <option value="Foggy">🌫️  Foggy</option>
+          <option value="Stormy">⛈️  Stormy</option>
+        </select>
+      </div>
+
+      <!-- Current Location -->
+      <div class="form-group" style="margin-bottom:28px;">
+        <label class="form-label">Current Location *</label>
+        <div class="location-box" id="location-box">
+          <span class="loc-icon">📍</span>
+          <div class="loc-text">
+            <strong id="location-status">Detecting GPS location…</strong>
+            <span id="location-coords"></span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="getLocation()" id="refresh-loc-btn">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="submit-section">
+        <h3>Ready to dispatch?</h3>
+        <p>The system will find the best hospital and notify traffic police along the route automatically.</p>
+        <button class="btn btn-emergency btn-lg" type="submit" id="submit-btn" style="min-width:220px;">
+          <span id="submit-text">🚨 Raise Emergency Alert</span>
+          <span class="spinner" id="submit-spinner" style="display:none;"></span>
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/utils.js"></script>
+<script>
+  let userLat = null, userLng = null;
+
+  async function getLocation() {
+    const statusEl = document.getElementById('location-status');
+    const coordsEl = document.getElementById('location-coords');
+    statusEl.textContent = 'Detecting GPS location…';
+    coordsEl.textContent = '';
+
+    if (!navigator.geolocation) {
+      statusEl.textContent = '⚠️ GPS not supported in this browser.';
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        statusEl.textContent = '✅ Location detected';
+        coordsEl.textContent = `${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
+      },
+      (err) => {
+        statusEl.textContent = '⚠️ Could not get location. Allow GPS and retry.';
+        console.warn('Geolocation error:', err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const severity = document.querySelector('input[name="severity"]:checked')?.value;
+    const illness  = document.getElementById('illness').value;
+    const weather  = document.getElementById('weather').value;
+
+    if (!severity) { showToast('Select patient severity', 'error'); return; }
+    if (!illness)  { showToast('Select illness type', 'error');     return; }
+    if (!userLat || !userLng) { showToast('GPS location not detected. Click Refresh.', 'error'); return; }
+
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    document.getElementById('submit-text').textContent = 'Creating alert…';
+    document.getElementById('submit-spinner').style.display = 'inline-block';
+
+    try {
+      const data = await apiPost('/api/alert', {
+        patientSeverity: severity,
+        illnessType:     illness,
+        currentLat:      userLat,
+        currentLng:      userLng,
+        weather,
+        holiday:         0,
+      });
+
+      if (data.success) {
+        // Mark step 3 active
+        document.getElementById('step-3').classList.add('done');
+        showToast('🚨 Alert raised! Redirecting to route…', 'success');
+        setTimeout(() => window.location.href = '/route-recommendation.html', 1200);
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to raise alert. Check API key.', 'error');
+      btn.disabled = false;
+      document.getElementById('submit-text').textContent = '🚨 Raise Emergency Alert';
+      document.getElementById('submit-spinner').style.display = 'none';
+    }
+  }
+
+  // Auto-detect location on load
+  const user = getUser();
+  if (!user || user.role !== 'ambulance') window.location.href = '/login.html';
+  else getLocation();
+</script>
+</body>
+</html>

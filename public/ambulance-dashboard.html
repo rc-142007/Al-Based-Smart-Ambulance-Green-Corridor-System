@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ambulance Dashboard — Smart Ambulance AI</title>
+  <meta name="description" content="Ambulance driver dashboard for emergency management and route tracking."/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+  <style>
+    body { background:
+      radial-gradient(ellipse 70% 50% at 10% 0%, rgba(21,101,192,0.12) 0%, transparent 60%),
+      var(--bg-dark);
+    }
+    .status-indicator {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--green-success);
+      box-shadow: 0 0 8px var(--green-success);
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .status-indicator.inactive { background: var(--text-muted); box-shadow: none; }
+    .active-alert-banner {
+      background: linear-gradient(135deg, rgba(211,47,47,0.2), rgba(255,23,68,0.1));
+      border: 1px solid rgba(255, 23, 68, 0.4);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      animation: pulse-red 2s infinite;
+    }
+    .active-alert-banner.hidden { display: none; }
+    .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+    .quick-action-card {
+      padding: 24px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+    .quick-action-card:hover { transform: translateY(-4px); border-color: var(--border-active); }
+    .quick-action-card .action-icon { font-size: 2.2rem; margin-bottom: 10px; display: block; }
+    .quick-action-card h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+    .quick-action-card p  { font-size: 0.78rem; color: var(--text-secondary); }
+
+    .history-table { width: 100%; border-collapse: collapse; }
+    .history-table th, .history-table td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 0.85rem;
+      border-bottom: 1px solid var(--border-glass);
+    }
+    .history-table th { color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }
+    .history-table tr:last-child td { border: none; }
+    .history-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+    .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border-glass); font-size: 0.88rem; }
+    .info-row:last-child { border: none; }
+    .info-row span:first-child { color: var(--text-secondary); }
+    .info-row span:last-child { font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="brand-icon">🚑</span>
+    <span>Smart Ambulance AI</span>
+  </div>
+  <div class="navbar-actions">
+    <div class="navbar-user">
+      <span class="status-indicator" id="connection-status"></span>
+      <span>Driver: <strong id="driver-name">Loading…</strong></span>
+      &nbsp;|&nbsp;
+      <span id="ambulance-id" style="font-family:JetBrains Mono,monospace; font-size:0.8rem; color:var(--blue-light)"></span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="page-container">
+
+  <!-- Active Alert Banner -->
+  <div class="active-alert-banner hidden" id="active-alert-banner">
+    <div>
+      <div style="font-weight:700; font-size:1rem;">🚨 Active Emergency Alert</div>
+      <div style="font-size:0.85rem; color:var(--text-secondary); margin-top:4px;" id="banner-hospital"></div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="eta-display" style="padding:0;text-align:left;">
+        <div class="eta-value" id="banner-eta" style="font-size:2rem;"></div>
+        <div class="eta-unit">minutes ETA</div>
+      </div>
+      <button class="btn btn-primary" onclick="window.location.href='/route-recommendation.html'">View Route →</button>
+    </div>
+  </div>
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Ambulance Dashboard</h1>
+      <p class="page-subtitle">Monitor status, raise alerts, and track emergencies</p>
+    </div>
+    <button class="btn btn-emergency pulse-red" onclick="window.location.href='/raise-alert.html'" id="raise-alert-btn">
+      🚨 Raise Emergency Alert
+    </button>
+  </div>
+
+  <!-- Stats Row -->
+  <div class="grid-4" style="margin-bottom:24px;">
+    <div class="glass-card stat-card fade-in-up">
+      <span class="stat-icon">🏥</span>
+      <div class="stat-value" id="stat-hospitals">—</div>
+      <div class="stat-label">Available Hospitals</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.1s;">
+      <span class="stat-icon">🚦</span>
+      <div class="stat-value" id="stat-junctions">—</div>
+      <div class="stat-label">Tracked Junctions</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.2s;">
+      <span class="stat-icon">🚨</span>
+      <div class="stat-value" id="stat-alerts">0</div>
+      <div class="stat-label">Total Alerts Today</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.3s;">
+      <span class="stat-icon" id="status-icon">🟢</span>
+      <div class="stat-value" id="stat-status" style="font-size:1.2rem;">Standby</div>
+      <div class="stat-label">Current Status</div>
+    </div>
+     
+  </div>
+
+  <!-- Quick Actions -->
+  <div style="margin-bottom:24px;">
+    <h2 style="font-size:1rem; font-weight:700; color:var(--text-secondary); margin-bottom:16px; text-transform:uppercase; letter-spacing:0.05em;">Quick Actions</h2>
+    <div class="quick-actions">
+      <div class="glass-card quick-action-card" onclick="window.location.href='/raise-alert.html'">
+        <span class="action-icon">🚨</span>
+        <h3>Raise Alert</h3>
+        <p>Start new emergency</p>
+      </div>
+      <div class="glass-card quick-action-card" onclick="window.location.href='/route-recommendation.html'">
+        <span class="action-icon">🗺️</span>
+        <h3>Active Route</h3>
+        <p>View navigation</p>
+      </div>
+      <div class="glass-card quick-action-card" id="arrived-btn" onclick="markArrived()" style="display:none;">
+        <span class="action-icon">✅</span>
+        <h3>Mark Arrived</h3>
+        <p>Close this alert</p>
+      </div>
+      <div class="glass-card quick-action-card" onclick="refreshDashboard()">
+        <span class="action-icon">🔄</span>
+        <h3>Refresh</h3>
+        <p>Reload dashboard</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vehicle & Driver Info -->
+  <div class="grid-2" style="margin-bottom:24px;">
+    <div class="glass-card" style="padding:24px;">
+      <h2 style="font-size:1rem; font-weight:700; margin-bottom:16px;">👤 Driver Information</h2>
+      <div id="driver-info">
+        <div class="info-row"><span>Name</span><span id="info-name">—</span></div>
+        <div class="info-row"><span>Ambulance ID</span><span id="info-ambu-id">—</span></div>
+        <div class="info-row"><span>Vehicle</span><span id="info-vehicle">—</span></div>
+        <div class="info-row"><span>Role</span><span>Ambulance Driver</span></div>
+        <div class="info-row"><span>Status</span><span style="color:var(--green-success);">Active</span></div>
+      </div>
+    </div>
+    <div class="glass-card" style="padding:24px;">
+      <h2 style="font-size:1rem; font-weight:700; margin-bottom:16px;">📊 Active Alert Details</h2>
+      <div id="active-alert-details">
+        <div style="color:var(--text-muted); font-size:0.9rem; text-align:center; padding:20px 0;">
+          No active alert. Press <strong style="color:var(--red-hot);">Raise Alert</strong> to begin.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert History -->
+  <div class="glass-card" style="padding:24px;">
+    <h2 style="font-size:1rem; font-weight:700; margin-bottom:16px;">📋 Recent Activity</h2>
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>Alert ID</th>
+          <th>Illness</th>
+          <th>Severity</th>
+          <th>Hospital</th>
+          <th>ETA</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="alert-history">
+        <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">No history yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<script src="/js/utils.js"></script>
+<script src="/js/socket-client.js"></script>
+<script>
+  let activeAlert = null;
+  let user = null;
+
+
+  // ── Live GPS Tracking ────────────────────────────────────────────────────
+  window._trackingStarted = false;
+
+  function startLiveTracking() {
+    if (window._trackingStarted) return;
+    window._trackingStarted = true;
+
+    if (!navigator.geolocation) {
+      console.warn('Geolocation not supported');
+      return;
+    }
+
+    console.log('📍 Starting live GPS tracking...');
+
+    navigator.geolocation.watchPosition(
+      (position) => {
+        const payload = {
+          ambulanceId: user.ambulanceId,
+          latitude:    position.coords.latitude,
+          longitude:   position.coords.longitude,
+          heading:     position.coords.heading,
+          speed:       position.coords.speed,
+          timestamp:   new Date().toISOString(),
+        };
+
+        if (window.socket && window.socket.connected) {
+          window.socket.emit('ambulanceLocation', payload);
+          console.log('📍 Location sent:', payload.latitude, payload.longitude);
+        } else {
+          console.warn('⚠️ Socket not ready, location not sent');
+        }
+      },
+      (error) => { console.error('Geolocation error:', error.message); },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+  }
+
+  async function init() {
+    user = getUser();
+    if (!user || user.role !== 'ambulance') {
+      window.location.href = '/login.html';
+      return;
+    }
+    // Connect socket first, then start location tracking once connected
+    initSocket(user.ambulanceId, 'ambulance');
+
+    // Wait for socket to connect before starting GPS tracking
+    document.addEventListener('socket:connected', () => {
+      startLiveTracking();
+    });
+
+    // Fallback: also try after a short delay in case event already fired
+    setTimeout(() => {
+      if (window.socket && window.socket.connected && !window._trackingStarted) {
+        startLiveTracking();
+      }
+    }, 2000);
+
+await loadStats();
+await loadActiveAlert();
+    // Fill user info
+    document.getElementById('driver-name').textContent    = user.name;
+    document.getElementById('ambulance-id').textContent   = user.ambulanceId;
+    document.getElementById('info-name').textContent      = user.name;
+    document.getElementById('info-ambu-id').textContent   = user.ambulanceId;
+    document.getElementById('info-vehicle').textContent   = user.vehicleNumber || '—';
+
+    // Connect socket
+    initSocket(user.ambulanceId, 'ambulance');
+
+    // Load stats
+    await loadStats();
+    await loadActiveAlert();
+  }
+
+  async function loadStats() {
+    try {
+      const [hospitalsRes, junctionsRes] = await Promise.all([
+        apiGet('/api/hospitals'),
+        apiGet('/api/junctions'),
+      ]);
+      document.getElementById('stat-hospitals').textContent = hospitalsRes.count || '—';
+      document.getElementById('stat-junctions').textContent = junctionsRes.count || '—';
+    } catch (_) {}
+  }
+
+  async function loadActiveAlert() {
+    try {
+      const data = await apiGet('/api/alert/active');
+      activeAlert = data.alert;
+      updateAlertUI();
+    } catch (_) {}
+  }
+
+  function updateAlertUI() {
+    const banner  = document.getElementById('active-alert-banner');
+    const details = document.getElementById('active-alert-details');
+    const arrivedBtn = document.getElementById('arrived-btn');
+
+    if (!activeAlert) {
+      banner.classList.add('hidden');
+      arrivedBtn.style.display = 'none';
+      document.getElementById('stat-status').textContent = 'Standby';
+      document.getElementById('status-icon').textContent = '🟢';
+      details.innerHTML = `<div style="color:var(--text-muted);font-size:0.9rem;text-align:center;padding:20px 0;">
+        No active alert. Press <strong style="color:var(--red-hot);">Raise Alert</strong> to begin.
+      </div>`;
+      return;
+    }
+
+    // Show banner
+    banner.classList.remove('hidden');
+    arrivedBtn.style.display = 'flex';
+    document.getElementById('banner-hospital').textContent = `→ ${activeAlert.selectedHospital?.hospitalName}`;
+    document.getElementById('banner-eta').textContent      = activeAlert.selectedRoute?.finalETA_min || '—';
+    document.getElementById('stat-status').textContent     = 'EN ROUTE';
+    document.getElementById('status-icon').textContent     = '🚨';
+    document.getElementById('stat-alerts').textContent     = '1';
+
+    const ill = activeAlert.illnessType?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    details.innerHTML = `
+      <div class="info-row"><span>Alert ID</span><span>${activeAlert.alertId || activeAlert._id}</span></div>
+      <div class="info-row"><span>Illness</span><span>${ill}</span></div>
+      <div class="info-row"><span>Severity</span><span><span class="badge badge-${activeAlert.patientSeverity}">${activeAlert.patientSeverity}</span></span></div>
+      <div class="info-row"><span>Hospital</span><span>${activeAlert.selectedHospital?.hospitalName}</span></div>
+      <div class="info-row"><span>ETA</span><span style="color:var(--red-hot);font-weight:800;">${activeAlert.selectedRoute?.finalETA_min} min</span></div>
+      <div class="info-row"><span>Police Notified</span><span>${activeAlert.notifiedPolice?.length || 0} officers</span></div>
+    `;
+  }
+
+  async function markArrived() {
+    if (!activeAlert) return;
+    try {
+      await apiPatch(`/api/alert/${activeAlert._id}/status`, { status: 'arrived' });
+      showToast('✅ Marked as arrived at hospital!', 'success');
+      activeAlert = null;
+      updateAlertUI();
+    } catch (err) {
+      showToast('Failed to update status.', 'error');
+    }
+  }
+
+  async function refreshDashboard() {
+    await loadStats();
+    await loadActiveAlert();
+    showToast('Dashboard refreshed', 'info');
+  }
+
+  // Socket events for real-time updates
+  document.addEventListener('socket:alert-created', (e) => {
+    activeAlert = e.detail;
+    updateAlertUI();
+  });
+
+  init();
+</script>
+</body>
+</html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Traffic Police Dashboard — Smart Ambulance AI</title>
+  <meta name="description" content="Traffic police officer dashboard for real-time ambulance alerts and junction clearance."/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+  <style>
+    body { background:
+      radial-gradient(ellipse 70% 50% at 90% 0%, rgba(30,136,229,0.12) 0%, transparent 60%),
+      var(--bg-dark);
+    }
+
+    .junction-hero {
+      background: linear-gradient(135deg, rgba(21,101,192,0.2), rgba(30,136,229,0.08));
+      border: 1px solid rgba(30,136,229,0.35);
+      border-radius: var(--radius-xl);
+      padding: 28px 32px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .junction-hero .junction-icon { font-size: 3rem; filter: drop-shadow(0 0 12px var(--blue-accent)); }
+    .junction-hero h2 { font-size: 1.4rem; font-weight: 800; }
+    .junction-hero p  { font-size: 0.88rem; color: var(--text-secondary); margin-top: 4px; }
+    .junction-stats   { display: flex; gap: 24px; margin-top: 12px; }
+    .junction-stat    { display: flex; flex-direction: column; }
+    .junction-stat .j-val { font-size: 1.4rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--blue-light); }
+    .junction-stat .j-lbl { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+    .alert-card {
+      padding: 20px;
+      margin-bottom: 12px;
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .alert-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: var(--red-hot);
+    }
+    .alert-card.medium::before { background: var(--orange); }
+    .alert-card.low::before    { background: var(--green-success); }
+    .alert-card.cleared        { opacity: 0.55; }
+    .alert-card.cleared::before{ background: var(--text-muted); }
+
+    .alert-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .alert-title  { font-size: 1rem; font-weight: 700; }
+    .alert-time   { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+
+    .alert-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+    .meta-item  { background: rgba(255,255,255,0.03); border-radius: var(--radius-sm); padding: 8px 12px; }
+    .meta-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .meta-value { font-size: 0.9rem; font-weight: 700; margin-top: 2px; }
+
+    .alert-actions { display: flex; gap: 8px; }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--text-secondary);
+    }
+    .empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
+    .empty-state p  { font-size: 0.85rem; }
+
+    /* Siren animation for new alerts */
+    @keyframes sirenspin {
+      0%,100% { filter: drop-shadow(0 0 8px var(--red-hot)); }
+      50%      { filter: drop-shadow(0 0 20px var(--red-hot)); }
+    }
+    .siren-active { animation: sirenspin 1s infinite; }
+
+    .connection-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green-success);
+      box-shadow: 0 0 6px var(--green-success);
+      display: inline-block; margin-right: 6px;
+    }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="brand-icon">👮</span>
+    <span>Traffic Police Portal</span>
+  </div>
+  <div class="navbar-actions">
+    <div class="navbar-user">
+      <span class="connection-dot" id="conn-dot"></span>
+      Officer: <strong id="officer-name" style="margin-left:4px;">Loading…</strong>
+    </div>
+    <div class="navbar-user" style="font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--blue-light);" id="police-id-display"></div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="page-container">
+
+  <!-- Junction Hero Card -->
+  <div class="junction-hero fade-in-up" id="junction-hero">
+    <span class="junction-icon">🚦</span>
+    <div style="flex:1;">
+      <h2 id="junction-name">Loading junction…</h2>
+      <p id="junction-type">Your assigned traffic post</p>
+      <div class="junction-stats">
+        <div class="junction-stat">
+          <span class="j-val" id="cong-weight">—</span>
+          <span class="j-lbl">Congestion Weight</span>
+        </div>
+        <div class="junction-stat">
+          <span class="j-val" id="junction-type-tag">—</span>
+          <span class="j-lbl">Junction Type</span>
+        </div>
+        <div class="junction-stat">
+          <span class="j-val" id="is-major">—</span>
+          <span class="j-lbl">Classification</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Row -->
+  <div class="grid-4" style="margin-bottom:24px;">
+    <div class="glass-card stat-card fade-in-up">
+      <span class="stat-icon" id="alert-icon">🟢</span>
+      <div class="stat-value" id="active-count">0</div>
+      <div class="stat-label">Active Alerts</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.1s;">
+      <span class="stat-icon">✅</span>
+      <div class="stat-value" id="cleared-count">0</div>
+      <div class="stat-label">Routes Cleared</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.2s;">
+      <span class="stat-icon">👀</span>
+      <div class="stat-value" id="ack-count">0</div>
+      <div class="stat-label">Acknowledged</div>
+    </div>
+    <div class="glass-card stat-card fade-in-up" style="animation-delay:0.3s;">
+      <span class="stat-icon">🔌</span>
+      <div class="stat-value" id="conn-status" style="font-size:1rem;">Live</div>
+      <div class="stat-label">Socket Status</div>
+    </div>
+    
+  </div>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Active Ambulance Alerts</h1>
+      <p class="page-subtitle">Real-time incoming ambulance notifications for your junction</p>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="loadAlerts()">🔄 Refresh</button>
+  </div>
+
+
+  <!-- Live Ambulance Tracking Map -->
+  <div class="page-header" style="margin-top:24px;">
+    <div>
+      <h1 class="page-title">📍 Live Ambulance Tracking</h1>
+      <p class="page-subtitle">Real-time GPS position of active ambulances</p>
+    </div>
+    <span id="map-status" style="font-size:0.85rem; color:var(--text-muted);">Waiting for location data…</span>
+  </div>
+  <div class="glass-card fade-in-up" style="padding:0; overflow:hidden; border-radius:16px; margin-bottom:24px;">
+    <div id="live-map" style="width:100%; height:380px; background:#1a1f2e;"></div>
+  </div>
+
+  <!-- Alerts Container -->
+  <div id="alerts-container">
+    <div class="empty-state">
+      <div class="empty-icon">🟢</div>
+      <h3>All Clear</h3>
+      <p>No active ambulance alerts at your junction right now.</p>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast-container"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/js/utils.js"></script>
+<script src="/js/socket-client.js"></script>
+<script>
+  let user     = getUser();
+  let alerts   = [];
+
+  if (!user || user.role !== 'police') window.location.href = '/login.html';
+
+  async function init() {
+    document.getElementById('officer-name').textContent     = user.name;
+    document.getElementById('police-id-display').textContent= user.policeId;
+
+    // Load junction info
+    await loadJunction();
+    // Load existing alerts
+    await loadAlerts();
+
+    // Socket.IO — join police room
+    initSocket(user.policeId, 'police');
+
+    // Listen for incoming ambulance alert
+    document.addEventListener('socket:ambulance-alert', (e) => {
+      const alert = e.detail;
+      showToast(`🚨 Ambulance incoming! ETA: ${alert.etaToJunction_min} min`, 'error');
+      document.getElementById('alert-icon').textContent = '🚨';
+      document.getElementById('alert-icon').classList.add('siren-active');
+      // Play alert sound
+      try { new Audio('/sounds/alert.mp3').play(); } catch(_) {}
+      loadAlerts(); // Refresh alert list
+    });
+  }
+
+  async function loadJunction() {
+    try {
+      const data = await apiGet('/api/police/junction');
+      const j    = data.junction;
+      if (!j) {
+        document.getElementById('junction-name').textContent = 'No junction assigned';
+        return;
+      }
+      document.getElementById('junction-name').textContent  = j.junctionName;
+      document.getElementById('junction-type').textContent  = j.remarks || 'Traffic post';
+      document.getElementById('cong-weight').textContent    = j.congestionWeight;
+      document.getElementById('junction-type-tag').textContent = j.junctionType || '—';
+      document.getElementById('is-major').textContent       = j.isMajorJunction ? '⚠️ Major' : 'Minor';
+    } catch (_) {}
+  }
+
+  async function loadAlerts() {
+    try {
+      const data = await apiGet('/api/police/alerts');
+      alerts = data.alerts || [];
+
+      // Update stats
+      const active  = alerts.filter(a => a.status === 'active' || a.status === 'en_route').length;
+      const my      = alerts.flatMap(a => a.notifiedPolice || []).filter(p => p.policeId === user.policeId);
+      const cleared = my.filter(p => p.cleared).length;
+      const ack     = my.filter(p => p.acknowledged).length;
+
+      document.getElementById('active-count').textContent  = active;
+      document.getElementById('cleared-count').textContent = cleared;
+      document.getElementById('ack-count').textContent     = ack;
+
+      renderAlerts();
+    } catch (_) {}
+  }
+
+  function renderAlerts() {
+    const container = document.getElementById('alerts-container');
+
+    if (!alerts.length) {
+      container.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">🟢</div>
+        <h3>All Clear</h3>
+        <p>No active ambulance alerts at your junction right now.</p>
+      </div>`;
+      return;
+    }
+
+    container.innerHTML = alerts.map(alert => {
+      const myEntry  = alert.notifiedPolice?.find(p => p.policeId === user.policeId);
+      const severity = alert.patientSeverity;
+      const isCleared= myEntry?.cleared;
+      const isAck    = myEntry?.acknowledged;
+      const ill      = (alert.illnessType || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const timeAgo  = getTimeAgo(alert.createdAt);
+
+      return `<div class="glass-card alert-card ${severity} ${isCleared ? 'cleared' : ''} alert-notification ${severity}" id="alert-card-${alert._id}">
+        <div class="alert-header">
+          <div>
+            <div class="alert-title">🚑 ${alert.ambulanceCode || 'AMB'} — ${ill}</div>
+            <div style="margin-top:4px; display:flex; gap:8px; align-items:center;">
+              <span class="badge badge-${severity}">${severity}</span>
+              ${isAck ? '<span class="badge badge-active">✅ Acknowledged</span>' : ''}
+              ${isCleared ? '<span class="badge badge-cleared">🛡️ Cleared</span>' : ''}
+            </div>
+          </div>
+          <div class="alert-time">${timeAgo}</div>
+        </div>
+
+        <div class="alert-meta">
+          <div class="meta-item">
+            <div class="meta-label">🏥 Hospital</div>
+            <div class="meta-value" style="font-size:0.82rem;">${alert.selectedHospital?.hospitalName || '—'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">⏱️ Final ETA</div>
+            <div class="meta-value" style="color:var(--red-hot);">${alert.selectedRoute?.finalETA_min || '—'} min</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">📍 ETA to Junction</div>
+            <div class="meta-value" style="color:var(--blue-light);">${myEntry?.etaToJunction_min || '—'} min</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">📏 Distance</div>
+            <div class="meta-value">${alert.selectedRoute?.distance_km || '—'} km</div>
+          </div>
+        </div>
+
+        <div class="alert-actions">
+          ${!isAck ? `<button class="btn btn-primary btn-sm" onclick="acknowledgeAlert('${alert._id}')">✅ Acknowledge</button>` : ''}
+          ${!isCleared ? `<button class="btn btn-success btn-sm" onclick="clearRoute('${alert._id}')">🛡️ Mark Cleared</button>` : ''}
+          ${isCleared ? `<span style="color:var(--green-success);font-size:0.85rem;font-weight:600;">✅ Route Cleared — Good job!</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function acknowledgeAlert(alertId) {
+    try {
+      await apiPatch(`/api/police/alert/${alertId}/acknowledge`, {});
+      showToast('Alert acknowledged. Prepare for ambulance!', 'info');
+      await loadAlerts();
+    } catch (err) { showToast('Failed to acknowledge.', 'error'); }
+  }
+
+  async function clearRoute(alertId) {
+    try {
+      await apiPatch(`/api/police/alert/${alertId}/clear`, {});
+      showToast('✅ Route marked as cleared!', 'success');
+      await loadAlerts();
+    } catch (err) { showToast('Failed to clear route.', 'error'); }
+  }
+
+  function getTimeAgo(isoDate) {
+    const diff = Math.floor((Date.now() - new Date(isoDate)) / 1000);
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    return `${Math.floor(diff/3600)}h ago`;
+  }
+
+  // ── Live Tracking Map ─────────────────────────────────────────────────────
+  let liveMap = null;
+  let ambulanceMarker = null;
+  let routePath = null;
+  const locationHistory = [];
+
+  function initLiveMap() {
+    liveMap = L.map('live-map', { zoomControl: true }).setView([16.3067, 80.4365], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(liveMap);
+  }
+
+  function updateAmbulanceMarker(lat, lng) {
+    const latLng = [lat, lng];
+    locationHistory.push(latLng);
+
+    const ambulanceIcon = L.divIcon({
+      html: '<div style="font-size:28px; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">🚑</div>',
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
+      className: '',
+    });
+
+    if (ambulanceMarker) {
+      ambulanceMarker.setLatLng(latLng);
+    } else {
+      ambulanceMarker = L.marker(latLng, { icon: ambulanceIcon })
+        .addTo(liveMap)
+        .bindPopup('<b>🚑 Ambulance</b><br>Live tracking active');
+    }
+
+    // Draw path
+    if (routePath) liveMap.removeLayer(routePath);
+    if (locationHistory.length > 1) {
+      routePath = L.polyline(locationHistory, { color: '#ef4444', weight: 3, opacity: 0.8 }).addTo(liveMap);
+    }
+
+    liveMap.setView(latLng, liveMap.getZoom() < 14 ? 15 : liveMap.getZoom());
+
+    document.getElementById('map-status').textContent =
+      `Last update: ${new Date().toLocaleTimeString()} — Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}`;
+    document.getElementById('map-status').style.color = 'var(--green-success)';
+  }
+
+  // Listen for live location events from socket
+  document.addEventListener('socket:ambulance-location', (e) => {
+    const { latitude, longitude } = e.detail;
+    if (latitude && longitude) {
+      updateAmbulanceMarker(latitude, longitude);
+    }
+  });
+
+
+  initLiveMap();
+  init();
+</script>
+</body>
+</html>

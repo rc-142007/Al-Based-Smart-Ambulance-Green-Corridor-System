@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login — Smart Ambulance AI</title>
+  <meta name="description" content="Secure login for ambulance drivers and traffic police officers."/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 0%, rgba(21,101,192,0.18) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 100%, rgba(211,47,47,0.12) 0%, transparent 60%),
+        var(--bg-dark);
+      overflow: hidden;
+    }
+    /* Animated background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+    }
+    .login-wrapper {
+      width: 100%;
+      max-width: 460px;
+      padding: 24px;
+      position: relative;
+      z-index: 1;
+    }
+    .login-logo {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .login-logo .siren {
+      font-size: 3.5rem;
+      display: block;
+      filter: drop-shadow(0 0 20px var(--red-hot));
+      animation: pulse-red 2s infinite;
+      margin-bottom: 12px;
+    }
+    .login-logo h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff, var(--blue-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .login-logo p {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+    .login-card {
+      padding: 36px 32px;
+    }
+    /* Role Tabs */
+    .role-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 28px;
+      padding: 5px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-md);
+    }
+    .role-tab {
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .role-tab.active {
+      background: linear-gradient(135deg, var(--blue-primary), var(--blue-accent));
+      color: #fff;
+      box-shadow: var(--shadow-blue);
+    }
+    .role-tab:not(.active):hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+
+    .form-stack { display: flex; flex-direction: column; gap: 18px; }
+
+    .login-footer {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .error-msg {
+      background: rgba(255, 23, 68, 0.1);
+      border: 1px solid rgba(255, 23, 68, 0.3);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      color: var(--red-hot);
+      display: none;
+    }
+    .error-msg.show { display: block; }
+  </style>
+</head>
+<body>
+
+<div class="login-wrapper fade-in-up">
+  <!-- Logo -->
+  <div class="login-logo">
+    <span class="siren">🚨</span>
+    <h1>Smart Ambulance AI</h1>
+    <p>AI-Powered Emergency Routing & Traffic Coordination</p>
+  </div>
+
+  <!-- Login Card -->
+  <div class="glass-card login-card">
+    <!-- Role Selector -->
+    <div class="role-tabs" role="tablist" aria-label="Select role">
+      <button class="role-tab active" id="tab-ambulance" data-role="ambulance"
+              onclick="switchRole('ambulance')" aria-selected="true">
+        🚑 Ambulance Driver
+      </button>
+      <button class="role-tab" id="tab-police" data-role="police"
+              onclick="switchRole('police')" aria-selected="false">
+        👮 Traffic Police
+      </button>
+    </div>
+
+    <!-- Error -->
+    <div class="error-msg" id="error-msg"></div>
+
+    <!-- Form -->
+    <form id="login-form" class="form-stack" onsubmit="handleLogin(event)" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <input class="form-input" type="text" id="username" name="username"
+               placeholder="Enter your username" required autocomplete="username"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" name="password"
+               placeholder="Enter your password" required autocomplete="current-password"/>
+      </div>
+
+      <button class="btn btn-primary btn-full btn-lg" type="submit" id="login-btn">
+        <span id="btn-text">Login</span>
+        <span class="spinner" id="btn-spinner" style="display:none;"></span>
+      </button>
+    </form>
+
+    <div class="login-footer">
+      Emergency services only &nbsp;•&nbsp; Secured with JWT
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<script>
+  let selectedRole = 'ambulance';
+
+  function switchRole(role) {
+    selectedRole = role;
+    document.querySelectorAll('.role-tab').forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.role === role);
+      tab.setAttribute('aria-selected', tab.dataset.role === role);
+    });
+    document.getElementById('error-msg').classList.remove('show');
+    document.getElementById('username').focus();
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const errEl    = document.getElementById('error-msg');
+    const btnText  = document.getElementById('btn-text');
+    const spinner  = document.getElementById('btn-spinner');
+    const btn      = document.getElementById('login-btn');
+
+    if (!username || !password) {
+      showError('Please enter both username and password.');
+      return;
+    }
+
+    // Loading state
+    btn.disabled    = true;
+    btnText.textContent = 'Logging in…';
+    spinner.style.display = 'inline-block';
+    errEl.classList.remove('show');
+
+    try {
+      const res  = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, role: selectedRole }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Login failed.');
+      }
+
+      // Store token and user data
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user',  JSON.stringify(data.user));
+      localStorage.setItem('role',  selectedRole);
+
+      showToast(`Welcome back, ${data.user.name}! 🚀`, 'success');
+
+      // Redirect based on role
+      setTimeout(() => {
+        if (selectedRole === 'ambulance') {
+          window.location.href = '/ambulance-dashboard.html';
+        } else {
+          window.location.href = '/police-dashboard.html';
+        }
+      }, 800);
+
+    } catch (err) {
+      showError(err.message || 'Something went wrong. Try again.');
+    } finally {
+      btn.disabled    = false;
+      btnText.textContent = 'Login';
+      spinner.style.display = 'none';
+    }
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = '⚠️  ' + msg;
+    el.classList.add('show');
+  }
+
+  function showToast(msg, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3500);
+  }
+
+  // Redirect if already logged in
+  const existingToken = localStorage.getItem('token');
+  const existingRole  = localStorage.getItem('role');
+  if (existingToken && existingRole) {
+    if (existingRole === 'ambulance') window.location.href = '/ambulance-dashboard.html';
+    else window.location.href = '/police-dashboard.html';
+  }
+</script>
+</body>
+</html>
